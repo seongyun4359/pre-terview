@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', 'Outfit', system-ui, -apple-system, sans-serif;
+  --color-brand-purple: #8b5cf6;
+  --color-brand-dark: #0f172a;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #090d16;
+    color: #f1f5f9;
+  }
+}
