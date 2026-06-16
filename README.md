@@ -285,9 +285,9 @@ pre-terview/
 - [x] UI/UX: FSD 아키텍처 기반의 프론트엔드 모듈화 및 전체 면접 화면 연동 퍼블리싱 완료.
 
 ### Phase 2: 비언어 분석 및 분석 정밀화
-- [ ] Frontend: MediaPipe Face Landmarker 연동 및 시선 이탈 감지 알고리즘 구현.
-- [ ] Backend: STAR 기법 기반의 답변 다차원 채점 프롬프트 고도화.
-- [ ] UI/UX: 다차원 리포트 대시보드 화면 및 차트(Recharts) 시각화 연동.
+- [x] Frontend: MediaPipe Face Landmarker 연동 및 시선 이탈 감지 알고리즘 구현 (시뮬레이션 fallback 포함).
+- [x] Backend: STAR 기법 기반의 답변 다차원 채점 프롬프트 고도화 (정량 지표 중심 감점 요인 강화).
+- [x] UI/UX: 다차원 리포트 대시보드 내 실시간 비언어 모니터링 추이 SVG Area Chart 시각화 추가.
 
 ### Phase 3: 실시간 스트리밍 고도화 및 최적화
 - [ ] Backend-Frontend: SSE(Server-Sent Events) 또는 WebSocket을 통한 STT 스트리밍 및 응답 시간 1.5초 이내 단축.
