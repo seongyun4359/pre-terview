@@ -279,10 +279,10 @@ pre-terview/
 ## 🗺️ 7. 개발 로드맵 (Roadmap)
 
 ### Phase 1: MVP 개발 (핵심 파이프라인 검증)
-- [ ] Backend: PDF 텍스트 추출 및 LangChain 이력서-JD 분석 체인 구축.
-- [ ] Frontend: 마이크/카메라 제어 인터페이스 설계 및 오디오 녹음 기능 구현.
-- [ ] AI Integration: OpenAI Whisper(STT) 및 TTS API 연동을 통한 대화 프로토타입 작성.
-- [ ] UI/UX: 기본 면접 진행 화면 퍼블리싱.
+- [x] Backend: PDF 텍스트 추출 및 LangChain 이력서-JD 분석 체인 구축.
+- [x] Frontend: 마이크/카메라 제어 인터페이스 설계 및 오디오 녹음 기능 구현.
+- [x] AI Integration: OpenAI/Gemini API 연동을 통한 대화 프로토타입 작성 (인메모리 세션 관리 연동).
+- [x] UI/UX: FSD 아키텍처 기반의 프론트엔드 모듈화 및 전체 면접 화면 연동 퍼블리싱 완료.
 
 ### Phase 2: 비언어 분석 및 분석 정밀화
 - [ ] Frontend: MediaPipe Face Landmarker 연동 및 시선 이탈 감지 알고리즘 구현.
