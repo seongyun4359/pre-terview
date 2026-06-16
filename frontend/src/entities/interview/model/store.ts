@@ -1,5 +1,7 @@
 import { create } from 'zustand';
-import type { Step, Question } from './types';
+import type { Step, Question, ReportData } from './types';
+
+const API_BASE_URL = 'http://localhost:5000/api';
 
 interface InterviewState {
   step: Step;
@@ -9,6 +11,9 @@ interface InterviewState {
   pdfFile: File | null;
   pdfText: string;
   isAnalyzing: boolean;
+  
+  sessionId: string | null;
+  reportData: ReportData | null;
   
   isCamOn: boolean;
   isMicOn: boolean;
@@ -38,11 +43,16 @@ interface InterviewState {
   setRecordedTime: (time: number | ((prev: number) => number)) => void;
   setMicLevel: (level: number) => void;
   setShowSubtitles: (show: boolean) => void;
-  nextQuestion: () => void;
+  
+  // API Actions
+  initSessionAPI: (formData: FormData) => Promise<void>;
+  submitAnswerAPI: (answer: string) => Promise<void>;
+  fetchReportAPI: () => Promise<void>;
+  
   resetSession: () => void;
 }
 
-export const useInterviewStore = create<InterviewState>((set) => ({
+export const useInterviewStore = create<InterviewState>((set, get) => ({
   step: 'setup',
   companyName: 'Google Korea',
   jobTitle: 'Front-End Engineer',
@@ -50,6 +60,9 @@ export const useInterviewStore = create<InterviewState>((set) => ({
   pdfFile: null,
   pdfText: '',
   isAnalyzing: false,
+  
+  sessionId: null,
+  reportData: null,
   
   isCamOn: false,
   isMicOn: true,
@@ -69,21 +82,9 @@ export const useInterviewStore = create<InterviewState>((set) => ({
   mockQuestions: [
     {
       id: 1,
-      text: "자기소개서에 적힌 '웹 성능 최적화 경험'에 대해 더 말씀해주실 수 있을까요? 특히 렌더링 성능을 개선하기 위해 구체적으로 어떤 조치를 취했는지 설명해 주세요.",
+      text: "이력서 분석을 바탕으로 맞춤형 질문이 실시간으로 여기에 노출됩니다.",
       persona: "David (Senior Tech Lead)",
       personaDesc: "디테일하고 냉철한 기술 중심 면접관"
-    },
-    {
-      id: 2,
-      text: "감사합니다. 그렇다면 React 18/19 환경에서 대규모 데이터를 렌더링할 때 발생할 수 있는 병목 현상과, 이를 Zustand 등의 상태 관리 라이브러리로 극대화하여 해결한 설계 경험이 있으신가요?",
-      persona: "David (Senior Tech Lead)",
-      personaDesc: "디테일하고 냉철한 기술 중심 면접관"
-    },
-    {
-      id: 3,
-      text: "마지막 질문입니다. 만약 개발 일정 마감이 급박한 상황에서 코드 퀄리티 유지와 릴리즈 기한 준수 중 하나를 선택해야 한다면, 어떤 가치에 무게를 두고 협업을 풀어나가겠습니까?",
-      persona: "Sarah (HR Manager)",
-      personaDesc: "협업과 커뮤니케이션을 중시하는 인사 담당자"
     }
   ],
   
@@ -104,12 +105,126 @@ export const useInterviewStore = create<InterviewState>((set) => ({
   })),
   setMicLevel: (micLevel) => set({ micLevel }),
   setShowSubtitles: (showSubtitles) => set({ showSubtitles }),
-  nextQuestion: () => set({
-    isRecording: false,
-    interviewStatus: 'evaluating',
-  }),
+  
+  // API 비동기 액션 구현
+  initSessionAPI: async (formData) => {
+    set({ isAnalyzing: true });
+    try {
+      const response = await fetch(`${API_BASE_URL}/sessions`, {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        throw new Error('면접 세션 생성에 실패했습니다.');
+      }
+      
+      const data = await response.json();
+      
+      // 첫 질문 설정
+      const initialQuestion: Question = {
+        id: 1,
+        text: data.firstQuestion.text,
+        persona: data.persona.name,
+        personaDesc: data.persona.tone
+      };
+      
+      set({
+        sessionId: data.sessionId,
+        mockQuestions: [initialQuestion],
+        currentQuestionIndex: 0,
+        isAnalyzing: false,
+        step: 'interview',
+        interviewStatus: 'speaking'
+      });
+    } catch (error) {
+      console.error(error);
+      set({ isAnalyzing: false });
+      throw error;
+    }
+  },
+  
+  submitAnswerAPI: async (answer) => {
+    const { sessionId, mockQuestions, currentQuestionIndex } = get();
+    if (!sessionId) return;
+    
+    set({ isRecording: false, interviewStatus: 'evaluating' });
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/answer`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ answer })
+      });
+      
+      if (!response.ok) {
+        throw new Error('답변 제출에 실패했습니다.');
+      }
+      
+      const data = await response.json();
+      
+      // 다음 질문을 질문 리스트에 추가
+      const nextQuestion: Question = {
+        id: mockQuestions.length + 1,
+        text: data.nextQuestion.text,
+        persona: mockQuestions[0].persona,
+        personaDesc: mockQuestions[0].personaDesc
+      };
+      
+      set({
+        mockQuestions: [...mockQuestions, nextQuestion],
+        currentQuestionIndex: currentQuestionIndex + 1,
+        interviewStatus: 'speaking'
+      });
+    } catch (error) {
+      console.error(error);
+      set({ interviewStatus: 'listening', isRecording: true });
+      throw error;
+    }
+  },
+  
+  fetchReportAPI: async () => {
+    const { sessionId } = get();
+    if (!sessionId) return;
+    
+    set({ interviewStatus: 'evaluating' });
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/report`);
+      if (!response.ok) {
+        throw new Error('리포트를 가져오지 못했습니다.');
+      }
+      
+      const data = await response.json();
+      
+      // 비언어 데이터 가짜 메타 주입 (종합)
+      const formattedReport: ReportData = {
+        overallScore: data.overallScore || 80,
+        logicScore: data.logicScore || 80,
+        nonVerbalScore: data.nonVerbalScore || 80,
+        speechScore: data.speechScore || 80,
+        wpm: 125,
+        fillerWordsCount: 6,
+        eyeContactRatio: 86.4,
+        qaReport: data.qaReport || []
+      };
+      
+      set({
+        reportData: formattedReport,
+        step: 'report'
+      });
+    } catch (error) {
+      console.error(error);
+      throw error;
+    }
+  },
+  
   resetSession: () => set({
     step: 'setup',
+    sessionId: null,
+    reportData: null,
     currentQuestionIndex: 0,
     recordedTime: 0,
     interviewStatus: 'idle',

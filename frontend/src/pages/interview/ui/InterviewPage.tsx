@@ -7,13 +7,13 @@ export const InterviewPage: React.FC = () => {
     interviewStatus,
     setInterviewStatus,
     currentQuestionIndex,
-    setCurrentQuestionIndex,
     isRecording,
     setIsRecording,
     setRecordedTime,
     setMicLevel,
-    setStep,
-    mockQuestions,
+    answers,
+    submitAnswerAPI,
+    fetchReportAPI
   } = useInterviewStore();
 
   const timerIntervalRef = useRef<number | null>(null);
@@ -53,19 +53,21 @@ export const InterviewPage: React.FC = () => {
     };
   }, [isRecording, setRecordedTime, setMicLevel]);
 
-  const handleNextQuestion = () => {
-    setIsRecording(false);
-    setInterviewStatus('evaluating');
-    
-    // AI 꼬리 질문 생성/평가 시뮬레이션
-    setTimeout(() => {
-      if (currentQuestionIndex < mockQuestions.length - 1) {
-        setCurrentQuestionIndex(currentQuestionIndex + 1);
-        setInterviewStatus('speaking');
+  const handleNextQuestion = async () => {
+    try {
+      const currentAnswer = answers[currentQuestionIndex] || '이 부분에 대해서 최선의 노력을 다해 진행했습니다.';
+      
+      // 질문 3개(인덱스 0, 1, 2) 완료 시 리포트로 전환
+      if (currentQuestionIndex >= 2) {
+        await submitAnswerAPI(currentAnswer);
+        await fetchReportAPI();
       } else {
-        setStep('report');
+        await submitAnswerAPI(currentAnswer);
       }
-    }, 2000);
+    } catch (err: any) {
+      console.error(err);
+      alert('답변 전송 및 꼬리질문 생성 실패: ' + (err.message || err));
+    }
   };
 
   const handleSkipQuestion = () => {
