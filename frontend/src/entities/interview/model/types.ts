@@ -20,6 +20,12 @@ export interface QAData {
   score: number;
 }
 
+export interface FrameMetric {
+  timestamp: number;
+  eyeContact: boolean;
+  tension: number; // 0 ~ 100
+}
+
 export interface ReportData {
   overallScore: number;
   logicScore: number;
@@ -29,4 +35,5 @@ export interface ReportData {
   fillerWordsCount: number;
   eyeContactRatio: number;
   qaReport: QAData[];
+  nonVerbalTimeline?: FrameMetric[];
 }
