@@ -1,7 +1,9 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import { Video, VideoOff, Mic, MicOff, CheckCircle, Play, AlertCircle, RefreshCw } from 'lucide-react';
 import { useInterviewStore } from '../../../entities/interview/model/store';
 import { formatTime } from '../../../shared/lib/formatTime';
+import { MediaPipeService } from '../../../shared/lib/mediapipe';
+import type { FaceLandmarker } from '@mediapipe/tasks-vision';
 
 interface InterviewRoomProps {
   onNextQuestion: () => void;
@@ -22,14 +24,36 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
     showSubtitles,
     setShowSubtitles,
     mockQuestions,
+    addFrameMetric,
   } = useInterviewStore();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [landmarker, setLandmarker] = useState<FaceLandmarker | null>(null);
+  const [isModelLoading, setIsModelLoading] = useState(false);
+  const [realTimeEyeContact, setRealTimeEyeContact] = useState(true);
 
-  // Web캠 미디어 바인딩
+  // 1. MediaPipe FaceLandmarker 로딩
+  useEffect(() => {
+    let active = true;
+    if (isCamOn) {
+      setIsModelLoading(true);
+      MediaPipeService.initFaceLandmarker().then((instance) => {
+        if (active) {
+          setLandmarker(instance);
+          setIsModelLoading(false);
+        }
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [isCamOn]);
+
+  // 2. Web캠 미디어 바인딩
   useEffect(() => {
     if (isCamOn && videoRef.current) {
-      navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+      navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 }, audio: false })
         .then((stream) => {
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
@@ -48,20 +72,140 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
     }
   }, [isCamOn, setIsCamOn]);
 
+  // 3. 실시간 프레임 분석 및 Canvas Face Mesh 오버레이 렌더링 루프
+  useEffect(() => {
+    let animationFrameId: number;
+    let lastMetricTime = 0;
+
+    const renderLoop = (now: number) => {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      if (video && canvas && isCamOn) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          // 캔버스 사이즈를 비디오 해상도 크기와 매핑
+          if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 360;
+          }
+
+          // 프레임 분석
+          const result = MediaPipeService.analyzeFrame(video, now, landmarker);
+          
+          setRealTimeEyeContact(result.eyeContact);
+
+          // 1초에 1번씩만 글로벌 store에 타임라인 데이터 적재
+          if (isRecording && now - lastMetricTime >= 1000) {
+            addFrameMetric({
+              timestamp: Math.round(now / 1000),
+              eyeContact: result.eyeContact,
+              tension: result.tension
+            });
+            lastMetricTime = now;
+          }
+
+          // 캔버스 클리어
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+          // Face Mesh 그리드 그리기 (랜드마크 오버레이)
+          if (result.landmarks && result.landmarks.length > 0) {
+            ctx.save();
+            // 좌우 반전 카메라 피드 대응 (Mirroring 효과 매칭)
+            ctx.translate(canvas.width, 0);
+            ctx.scale(-1, 1);
+
+            // 상태에 따라 와이어프레임 색상 동적 변경 (시선 이탈 시 적색 경고)
+            const strokeColor = result.eyeContact 
+              ? 'rgba(139, 92, 246, 0.45)' // Violet
+              : 'rgba(239, 68, 68, 0.65)'; // Red Warning
+              
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 1.2;
+
+            // 얼굴 외곽선 연결 그리기 (폴백 30포인트 기준 안전 대응)
+            ctx.beginPath();
+            const outerCount = Math.min(16, result.landmarks.length);
+            for (let i = 0; i < outerCount; i++) {
+              const pt = result.landmarks[i];
+              const px = pt.x * canvas.width;
+              const py = pt.y * canvas.height;
+              if (i === 0) ctx.moveTo(px, py);
+              else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.stroke();
+
+            // 눈, 코, 입, 홍채 묘사 (디테일 그리기)
+            if (result.landmarks.length >= 22) {
+              const drawDot = (idx: number, r = 2, color = '#a78bfa') => {
+                const pt = result.landmarks[idx];
+                ctx.beginPath();
+                ctx.arc(pt.x * canvas.width, pt.y * canvas.height, r, 0, Math.PI * 2);
+                ctx.fillStyle = color;
+                ctx.fill();
+              };
+
+              // 눈꼬리 가로선
+              ctx.beginPath();
+              ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
+              ctx.lineTo(result.landmarks[20].x * canvas.width, result.landmarks[20].y * canvas.height); // 임시 왼눈동자
+              ctx.stroke();
+
+              // 코끝 랜드마크 연결
+              ctx.beginPath();
+              ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
+              ctx.lineTo(result.landmarks[18].x * canvas.width, result.landmarks[18].y * canvas.height);
+              ctx.lineTo(result.landmarks[17].x * canvas.width, result.landmarks[17].y * canvas.height);
+              ctx.stroke();
+
+              // 입
+              ctx.beginPath();
+              ctx.arc(result.landmarks[19].x * canvas.width, result.landmarks[19].y * canvas.height, 6, 0, Math.PI, false);
+              ctx.stroke();
+
+              // 양측 눈동자/홍채 점
+              drawDot(20, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
+              drawDot(21, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
+            }
+            ctx.restore();
+          }
+        }
+      }
+      animationFrameId = requestAnimationFrame(renderLoop);
+    };
+
+    if (isCamOn) {
+      animationFrameId = requestAnimationFrame(renderLoop);
+    }
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [isCamOn, landmarker, isRecording, addFrameMetric]);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-6xl mx-auto w-full">
       {/* 왼쪽: 카메라 비디오 & 질문 스크립트 */}
       <div className="lg:col-span-8 space-y-6">
         <div className="relative aspect-video rounded-3xl overflow-hidden bg-slate-900 border border-slate-800 shadow-2xl flex items-center justify-center">
-          {isCamOn ? (
-            <video 
-              ref={videoRef} 
-              autoPlay 
-              playsInline 
-              muted 
-              className="w-full h-full object-cover scale-x-[-1]"
-            />
-          ) : (
+          
+          {/* 웹캠 비디오 피드 */}
+          <video 
+            ref={videoRef} 
+            autoPlay 
+            playsInline 
+            muted 
+            className={`w-full h-full object-cover scale-x-[-1] ${isCamOn ? 'block' : 'hidden'}`}
+          />
+
+          {/* 캔버스 Face Mesh 오버레이 */}
+          <canvas 
+            ref={canvasRef}
+            className={`absolute inset-0 w-full h-full object-cover pointer-events-none ${isCamOn ? 'block' : 'hidden'}`}
+          />
+
+          {!isCamOn && (
             <div className="text-center space-y-4">
               <div className="w-20 h-20 rounded-full bg-slate-950 border border-slate-800 flex items-center justify-center mx-auto text-slate-600">
                 <VideoOff className="w-10 h-10" />
@@ -73,11 +217,18 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
             </div>
           )}
 
-          {/* MediaPipe 시선 추적 표시 */}
+          {/* 실시간 시선 상태 라벨 */}
           {isCamOn && (
-            <div className="absolute top-4 left-4 bg-slate-950/80 backdrop-blur-md border border-slate-800 rounded-full px-3 py-1 flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span className="text-xs font-semibold text-slate-300">MediaPipe 시선 감지 중 (안정)</span>
+            <div className="absolute top-4 left-4 bg-slate-950/85 backdrop-blur-md border border-slate-800 rounded-full px-3 py-1 flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${realTimeEyeContact ? 'bg-emerald-500 animate-pulse' : 'bg-red-500 animate-ping'}`}></span>
+              <span className="text-xs font-semibold text-slate-300">
+                {isModelLoading 
+                  ? '비언어 분석 모델 로드 중...' 
+                  : realTimeEyeContact 
+                    ? 'MediaPipe 시선 추적 중 (정면 응시)' 
+                    : '⚠️ 경고: 시선 이탈 감지됨'
+                }
+              </span>
             </div>
           )}
 
