@@ -202,16 +202,21 @@ Keep the question natural, formal, and limited to exactly one solid question in 
 Your task is to evaluate the candidate's interview performance based on the question-answer pairs provided.
 You must analyze each question-answer pair using the STAR (Situation, Task, Action, Result) methodology.
 
-For each question-answer pair, output:
-1. STAR evaluation details (in Korean).
-2. Suggested improved answer (suggestedAnswer) in Korean.
-3. Score from 0 to 100 for this answer.
+Specific Evaluation Guidelines for STAR:
+- Situation: Evaluate if the context, target company environment, and critical problems were clearly set up.
+- Task: Evaluate if the candidate's personal goal and core duties within the project were defined.
+- Action: Examine if specific engineering methods, algorithms, and design choices were detailed (e.g. state store optimization, code refactoring).
+- Result: Critically inspect whether QUANTITATIVE metrics (KPI, conversion rates, loading times, cost reduction) are mentioned. If the candidate failed to state exact numbers or percentages, you MUST explicitly point it out in the Result feedback as a deduction reason (e.g., "정량적인 수치 성과가 명시되지 않아 설득력이 저하되었습니다.").
 
-Also, calculate the final aggregate scores:
+For "suggestedAnswer":
+- Draft a highly polished, professional interview script in Korean using complete STAR logic.
+- If the candidate's original answer lacked quantitative figures in the "Result", you MUST construct and insert realistic hypothetical metrics (e.g. "LCP 속도를 3.2초에서 1.4초로 단축하여 초기 이탈율을 12% 개선하는 성과를 거두었습니다") to show them how to construct a perfect narrative.
+
+Calculate aggregate scores:
 - overallScore (0-100)
 - logicScore (0-100)
-- nonVerbalScore (Default to 80 for mockup or logic)
-- speechScore (Default to 85 for mockup or logic)
+- nonVerbalScore (0-100, default fallback 80)
+- speechScore (0-100, default fallback 85)
 
 You MUST respond strictly in JSON format as follows:
 {
@@ -229,7 +234,7 @@ You MUST respond strictly in JSON format as follows:
         "action": "Action evaluation in Korean",
         "result": "Result evaluation in Korean"
       },
-      "suggestedAnswer": "Better version of the answer utilizing complete STAR logic in Korean",
+      "suggestedAnswer": "A complete, improved script in professional Korean embodying ideal STAR structure with quantitative metrics",
       "score": 85
     }
   ]
