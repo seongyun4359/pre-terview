@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Step, Question, ReportData, FrameMetric } from './types';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = 'http://localhost:5001/api';
 
 interface InterviewState {
   step: Step;
@@ -158,33 +158,74 @@ export const useInterviewStore = create<InterviewState>((set, get) => ({
     set({ isRecording: false, interviewStatus: 'evaluating' });
     
     try {
-      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/answer`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ answer })
-      });
+      const response = await fetch(`${API_BASE_URL}/sessions/${sessionId}/answer/stream?answer=${encodeURIComponent(answer)}`);
       
       if (!response.ok) {
-        throw new Error('답변 제출에 실패했습니다.');
+        throw new Error('답변 전송 및 스트리밍 연결에 실패했습니다.');
       }
       
-      const data = await response.json();
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
       
-      // 다음 질문을 질문 리스트에 추가
-      const nextQuestion: Question = {
-        id: mockQuestions.length + 1,
-        text: data.nextQuestion.text,
+      if (!reader) {
+        throw new Error('스트림 리더를 초기화할 수 없습니다.');
+      }
+
+      const nextIndex = mockQuestions.length + 1;
+      const nextQuestionPlaceholder: Question = {
+        id: nextIndex,
+        text: '',
         persona: mockQuestions[0].persona,
         personaDesc: mockQuestions[0].personaDesc
       };
-      
+
       set({
-        mockQuestions: [...mockQuestions, nextQuestion],
+        mockQuestions: [...mockQuestions, nextQuestionPlaceholder],
         currentQuestionIndex: currentQuestionIndex + 1,
         interviewStatus: 'speaking'
       });
+
+      let accumulatedText = '';
+      let partialLine = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunkText = decoder.decode(value, { stream: true });
+        const lines = (partialLine + chunkText).split('\n');
+        partialLine = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          if (trimmed.startsWith('data: ')) {
+            const dataStr = trimmed.slice(6);
+            if (dataStr === '[DONE]') {
+              break;
+            }
+            try {
+              const parsed = JSON.parse(dataStr);
+              if (parsed.chunk) {
+                accumulatedText += parsed.chunk;
+                set((state) => {
+                  const updatedQuestions = [...state.mockQuestions];
+                  const qIndex = updatedQuestions.findIndex(q => q.id === nextIndex);
+                  if (qIndex !== -1) {
+                    updatedQuestions[qIndex] = {
+                      ...updatedQuestions[qIndex],
+                      text: accumulatedText
+                    };
+                  }
+                  return { mockQuestions: updatedQuestions };
+                });
+              }
+            } catch (err) {
+              console.warn('SSE JSON 파싱 실패:', err);
+            }
+          }
+        }
+      }
     } catch (error) {
       console.error(error);
       set({ interviewStatus: 'listening', isRecording: true });
