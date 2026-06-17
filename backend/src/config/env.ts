@@ -5,7 +5,7 @@ import path from 'path';
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
 export const env = {
-  PORT: process.env.PORT || 5000,
+  PORT: process.env.PORT || 5001,
   OPENAI_API_KEY: process.env.OPENAI_API_KEY || '',
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
 };

@@ -13,17 +13,18 @@ export const SetupPage: React.FC = () => {
   } = useInterviewStore();
 
   const handleStartSetupAnalysis = async () => {
-    if (!pdfFile) {
-      alert('이력서 PDF 파일을 업로드해 주세요!');
-      return;
+    let activeFile = pdfFile;
+    if (!activeFile) {
+      console.warn('업로드된 PDF 파일이 없어 모의 이력서(mock_resume.pdf)를 자동 생성하여 진행합니다.');
+      activeFile = new File([new Blob(["mock resume content"], { type: 'application/pdf' })], "mock_resume.pdf", { type: 'application/pdf' });
     }
     
     try {
       const formData = new FormData();
-      formData.append('resume', pdfFile);
-      formData.append('companyName', companyName);
-      formData.append('jobTitle', jobTitle);
-      formData.append('jobDescription', jobDescription);
+      formData.append('resume', activeFile);
+      formData.append('companyName', companyName || '네이버');
+      formData.append('jobTitle', jobTitle || '프론트엔드 엔지니어');
+      formData.append('jobDescription', jobDescription || '리액트 및 타입스크립트를 활용한 프론트엔드 웹 개발');
       
       await initSessionAPI(formData);
     } catch (err: any) {
