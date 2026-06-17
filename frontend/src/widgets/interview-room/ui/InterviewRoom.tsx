@@ -72,10 +72,13 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
     }
   }, [isCamOn, setIsCamOn]);
 
-  // 3. 실시간 프레임 분석 및 Canvas Face Mesh 오버레이 렌더링 루프
+  // 3. 실시간 프레임 분석 및 Canvas Face Mesh 오버레이 렌더링 루프 (10 FPS 스로틀링 최적화)
   useEffect(() => {
     let animationFrameId: number;
     let lastMetricTime = 0;
+    let lastAnalysisTime = 0;
+    const THROTTLE_MS = 100; // 10 FPS
+    let cachedResult: any = null;
 
     const renderLoop = (now: number) => {
       const video = videoRef.current;
@@ -90,85 +93,83 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
             canvas.height = video.videoHeight || 360;
           }
 
-          // 프레임 분석
-          const result = MediaPipeService.analyzeFrame(video, now, landmarker);
-          
-          setRealTimeEyeContact(result.eyeContact);
-
-          // 1초에 1번씩만 글로벌 store에 타임라인 데이터 적재
-          if (isRecording && now - lastMetricTime >= 1000) {
-            addFrameMetric({
-              timestamp: Math.round(now / 1000),
-              eyeContact: result.eyeContact,
-              tension: result.tension
-            });
-            lastMetricTime = now;
+          // 10 FPS 스로틀링: 100ms마다 한 번만 분석 수행
+          let result = cachedResult;
+          if (now - lastAnalysisTime >= THROTTLE_MS) {
+            result = MediaPipeService.analyzeFrame(video, now, landmarker);
+            cachedResult = result;
+            lastAnalysisTime = now;
+            setRealTimeEyeContact(result.eyeContact);
           }
 
-          // 캔버스 클리어
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-          // Face Mesh 그리드 그리기 (랜드마크 오버레이)
-          if (result.landmarks && result.landmarks.length > 0) {
-            ctx.save();
-            // 좌우 반전 카메라 피드 대응 (Mirroring 효과 매칭)
-            ctx.translate(canvas.width, 0);
-            ctx.scale(-1, 1);
-
-            // 상태에 따라 와이어프레임 색상 동적 변경 (시선 이탈 시 적색 경고)
-            const strokeColor = result.eyeContact 
-              ? 'rgba(139, 92, 246, 0.45)' // Violet
-              : 'rgba(239, 68, 68, 0.65)'; // Red Warning
-              
-            ctx.strokeStyle = strokeColor;
-            ctx.lineWidth = 1.2;
-
-            // 얼굴 외곽선 연결 그리기 (폴백 30포인트 기준 안전 대응)
-            ctx.beginPath();
-            const outerCount = Math.min(16, result.landmarks.length);
-            for (let i = 0; i < outerCount; i++) {
-              const pt = result.landmarks[i];
-              const px = pt.x * canvas.width;
-              const py = pt.y * canvas.height;
-              if (i === 0) ctx.moveTo(px, py);
-              else ctx.lineTo(px, py);
+          if (result) {
+            // 1초에 1번씩만 글로벌 store에 타임라인 데이터 적재
+            if (isRecording && now - lastMetricTime >= 1000) {
+              addFrameMetric({
+                timestamp: Math.round(now / 1000),
+                eyeContact: result.eyeContact,
+                tension: result.tension
+              });
+              lastMetricTime = now;
             }
-            ctx.closePath();
-            ctx.stroke();
 
-            // 눈, 코, 입, 홍채 묘사 (디테일 그리기)
-            if (result.landmarks.length >= 22) {
-              const drawDot = (idx: number, r = 2, color = '#a78bfa') => {
-                const pt = result.landmarks[idx];
+            // 캔버스 클리어
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Face Mesh 그리드 그리기 (캐싱된 최신 랜드마크 렌더링)
+            if (result.landmarks && result.landmarks.length > 0) {
+              ctx.save();
+              ctx.translate(canvas.width, 0);
+              ctx.scale(-1, 1);
+
+              const strokeColor = result.eyeContact 
+                ? 'rgba(139, 92, 246, 0.45)' 
+                : 'rgba(239, 68, 68, 0.65)';
+                
+              ctx.strokeStyle = strokeColor;
+              ctx.lineWidth = 1.2;
+
+              ctx.beginPath();
+              const outerCount = Math.min(16, result.landmarks.length);
+              for (let i = 0; i < outerCount; i++) {
+                const pt = result.landmarks[i];
+                const px = pt.x * canvas.width;
+                const py = pt.y * canvas.height;
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+              }
+              ctx.closePath();
+              ctx.stroke();
+
+              if (result.landmarks.length >= 22) {
+                const drawDot = (idx: number, r = 2, color = '#a78bfa') => {
+                  const pt = result.landmarks[idx];
+                  ctx.beginPath();
+                  ctx.arc(pt.x * canvas.width, pt.y * canvas.height, r, 0, Math.PI * 2);
+                  ctx.fillStyle = color;
+                  ctx.fill();
+                };
+
                 ctx.beginPath();
-                ctx.arc(pt.x * canvas.width, pt.y * canvas.height, r, 0, Math.PI * 2);
-                ctx.fillStyle = color;
-                ctx.fill();
-              };
+                ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
+                ctx.lineTo(result.landmarks[20].x * canvas.width, result.landmarks[20].y * canvas.height);
+                ctx.stroke();
 
-              // 눈꼬리 가로선
-              ctx.beginPath();
-              ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
-              ctx.lineTo(result.landmarks[20].x * canvas.width, result.landmarks[20].y * canvas.height); // 임시 왼눈동자
-              ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
+                ctx.lineTo(result.landmarks[18].x * canvas.width, result.landmarks[18].y * canvas.height);
+                ctx.lineTo(result.landmarks[17].x * canvas.width, result.landmarks[17].y * canvas.height);
+                ctx.stroke();
 
-              // 코끝 랜드마크 연결
-              ctx.beginPath();
-              ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
-              ctx.lineTo(result.landmarks[18].x * canvas.width, result.landmarks[18].y * canvas.height);
-              ctx.lineTo(result.landmarks[17].x * canvas.width, result.landmarks[17].y * canvas.height);
-              ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(result.landmarks[19].x * canvas.width, result.landmarks[19].y * canvas.height, 6, 0, Math.PI, false);
+                ctx.stroke();
 
-              // 입
-              ctx.beginPath();
-              ctx.arc(result.landmarks[19].x * canvas.width, result.landmarks[19].y * canvas.height, 6, 0, Math.PI, false);
-              ctx.stroke();
-
-              // 양측 눈동자/홍채 점
-              drawDot(20, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
-              drawDot(21, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
+                drawDot(20, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
+                drawDot(21, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
+              }
+              ctx.restore();
             }
-            ctx.restore();
           }
         }
       }
