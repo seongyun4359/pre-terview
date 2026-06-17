@@ -148,4 +148,55 @@ export class SessionController {
       res.status(500).json({ error: error.message || '리포트를 생성하는 데 실패했습니다.' });
     }
   }
+
+  /**
+   * 사용자의 답변을 쿼리파라미터로 받아 SSE 스트림을 통해 실시간 꼬리 질문 청크를 반환합니다.
+   */
+  static async submitAnswerStream(req: Request, res: Response): Promise<void> {
+    const sessionId = req.params.sessionId as string;
+    const answer = req.query.answer as string;
+
+    if (!answer) {
+      res.status(400).json({ error: '답변 내용(answer)이 쿼리 파라미터로 필요합니다.' });
+      return;
+    }
+
+    const session = memorySessionStore.get(sessionId);
+    if (!session) {
+      res.status(404).json({ error: '지정된 면접 세션을 찾을 수 없습니다.' });
+      return;
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+
+    try {
+      session.history.push({ role: 'interviewee', content: answer });
+      session.qaPairs.push({
+        question: session.currentQuestion,
+        answer
+      });
+
+      let completeQuestion = '';
+      const stream = AIService.generateFollowUpStream(session.persona, session.history);
+
+      for await (const chunk of stream) {
+        completeQuestion += chunk;
+        res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+      }
+
+      session.currentQuestion = completeQuestion;
+      session.history.push({ role: 'interviewer', content: completeQuestion });
+      memorySessionStore.set(sessionId, session);
+
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+    } catch (error: any) {
+      console.error('실시간 답변 스트리밍 에러:', error);
+      res.write(`data: ${JSON.stringify({ error: error.message || '스트리밍 실패' })}\n\n`);
+      res.end();
+    }
+  }
 }

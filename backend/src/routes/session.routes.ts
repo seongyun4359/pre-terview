@@ -26,6 +26,9 @@ router.post('/sessions', upload.single('resume'), SessionController.createSessio
 // 2. 면접 답변 제출 및 실시간 꼬리 질문 생성
 router.post('/sessions/:sessionId/answer', SessionController.submitAnswer);
 
+// 2-2. 실시간 SSE 답변 제출 및 꼬리 질문 스트리밍
+router.get('/sessions/:sessionId/answer/stream', SessionController.submitAnswerStream);
+
 // 3. 피드백 리포트 조회
 router.get('/sessions/:sessionId/report', SessionController.getReport);
 

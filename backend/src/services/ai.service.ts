@@ -276,4 +276,61 @@ ${chatPairsStr}
       };
     }
   }
+
+  /**
+   * 답변 이력을 바탕으로 압박 꼬리 질문을 스트리밍 형태로 생성합니다.
+   */
+  static async *generateFollowUpStream(
+    persona: Persona,
+    history: { role: 'interviewer' | 'interviewee'; content: string }[]
+  ): AsyncGenerator<string, void, unknown> {
+    const model = this.getModel();
+
+    if (!model) {
+      // Mock 스트리밍 폴백 모드
+      const mockQuestionsList = [
+        "그 최적화 방식을 실제로 적용할 때 직면했던 가장 큰 복병과, 그것을 해결하기 위해 분석했던 브라우저 렌더링 프레임 메트릭은 구체적으로 무엇이었나요?",
+        "Zustand를 통한 성능 상의 이점이 React.memo의 오용을 막는 것 외에 가상 돔 메모리 점유율 관점에서 어떤 정량적 차이를 만들어냈습니까?",
+        "일정 내 납품을 위해 퀵픽스를 적용한 후, 다음 스프린트에서 리팩토링 티켓의 우선순위를 기획자나 비즈니스 조직과 합의하여 밀어붙였던 실무 프로세스 예시를 말씀해 주세요."
+      ];
+      const nextIndex = Math.min(history.length / 2, mockQuestionsList.length - 1);
+      const targetText = mockQuestionsList[Math.floor(nextIndex)];
+
+      for (let i = 0; i < targetText.length; i++) {
+        await new Promise(resolve => setTimeout(resolve, 40));
+        yield targetText[i];
+      }
+      return;
+    }
+
+    try {
+      const chatHistoryStr = history
+        .map(h => `${h.role === 'interviewer' ? 'Interviewer' : 'Candidate'}: ${h.content}`)
+        .join('\n');
+
+      const systemPrompt = `You are a virtual interviewer named "${persona.name}" with a tone of "${persona.tone}".
+Review the conversation history. Based on the candidate's last answer, generate a sharp, analytical follow-up (tail) question in Korean.
+Your follow-up question should probe the logical consistency, technical detail, or decision-making reasoning behind their previous answer.
+Keep the question natural, formal, and limited to exactly one solid question in Korean. Do not output anything other than the question itself.`;
+
+      const humanPrompt = `Conversation History:\n${chatHistoryStr}\n\nGenerate the next follow-up question in Korean:`;
+
+      const stream = await model.stream([
+        new SystemMessage(systemPrompt),
+        new HumanMessage(humanPrompt)
+      ]);
+
+      for await (const chunk of stream) {
+        if (chunk.content) {
+          yield chunk.content.toString();
+        }
+      }
+    } catch (error) {
+      console.error('AI 스트리밍 꼬리 질문 생성 에러 (폴백):', error);
+      const fallbackText = '설명해주신 부분에서 구체적인 성능 개선 지표가 어떻게 입증되었는지 타겟 수치로 요약해 주시겠습니까?';
+      for (let i = 0; i < fallbackText.length; i++) {
+        yield fallbackText[i];
+      }
+    }
+  }
 }
