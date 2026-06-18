@@ -60,7 +60,9 @@ src/
 영상 분석 시 무거운 영상 데이터 전송에 의한 랙을 방지하기 위해 클라이언트 로컬 단(Edge)에서 MediaPipe를 활용해 시선 정보를 추출하도록 아키텍처를 잡았습니다. 이를 위한 토대로 `navigator.mediaDevices.getUserMedia`를 활용한 실제 웹캠 스트림 연동 구조가 widgets 레벨에 선구현되어 있습니다.
 
 ### 3.3 MediaPipe FaceLandmarker 기반 시선/얼굴 추적 및 3D Mesh 시뮬레이션 Fallback
-- `src/shared/lib/mediapipe.ts` 모듈을 도입하여 정밀한 정면 응시(Eye Contact) 감지 알고리즘을 수행합니다.
+- [mediapipe.ts](file:///Users/lucha/Documents/develop/pre-terview/frontend/src/shared/lib/mediapipe.ts) 모듈을 도입하여 정밀한 정면 응시(Eye Contact) 감지 알고리즘을 수행합니다.
+  - **시선 이탈(정면 응시 미달) 감지:** 코(랜드마크 1번)와 좌우 눈(랜드마크 33번, 263번) 간 거리의 좌우 대칭성 편차(Yaw Deviation > 0.08) 및 이마(10번)와 코(1번) 간의 좌우 틀어짐 비율(Pitch Deviation > 0.05)을 실시간으로 추적하여 판별합니다.
+  - **긴장도(Tension) 추정:** 얼굴의 랜드마크 9번(미간 아래)과 10번(이마 중앙) 간의 미세한 상하 거리 요동(Micro-Jitter) 값을 가공하여 10~100 범위의 긴장 수치로 변환합니다.
 - 네트워크가 차단되거나 CDN 로드 장애 시 프로그램이 중단되지 않고 3D 얼굴 랜드마크 와이어프레임을 오버레이 그리도록 **무조건 작동하는 시뮬레이션 fallback**을 결합했습니다.
 - `InterviewRoom` 위젯에서 카메라가 켜지면 캔버스 오버레이 상에 투명한 보라색 그물망 그리드(Face Mesh)가 그려지며, **시선 이탈(Eye Contact 해제) 감지 시 그리드가 붉은색으로 점멸**하여 즉각적인 피드백을 유도합니다.
 
