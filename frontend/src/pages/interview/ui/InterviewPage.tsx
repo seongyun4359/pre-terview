@@ -53,16 +53,16 @@ export const InterviewPage: React.FC = () => {
     };
   }, [isRecording, setRecordedTime, setMicLevel]);
 
-  const handleNextQuestion = async () => {
+  const handleNextQuestion = async (answer: string) => {
     try {
-      const currentAnswer = answers[currentQuestionIndex] || '이 부분에 대해서 최선의 노력을 다해 진행했습니다.';
+      const finalAnswer = answer.trim() || answers[currentQuestionIndex] || '이 부분에 대해서 최선의 노력을 다해 진행했습니다.';
       
       // 질문 3개(인덱스 0, 1, 2) 완료 시 리포트로 전환
       if (currentQuestionIndex >= 2) {
-        await submitAnswerAPI(currentAnswer);
+        await submitAnswerAPI(finalAnswer);
         await fetchReportAPI();
       } else {
-        await submitAnswerAPI(currentAnswer);
+        await submitAnswerAPI(finalAnswer);
       }
     } catch (err: any) {
       console.error(err);

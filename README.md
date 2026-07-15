@@ -293,9 +293,9 @@ pre-terview/
 
 ### Phase 3: 실시간 스트리밍 고도화 및 최적화
 - [x] Backend-Frontend: SSE(Server-Sent Events)를 통한 실시간 꼬리 질문 스트리밍(Chunk 단위 출하) 구현 및 응답 시간 최적화 완료.
-- [ ] Frontend: 마이크 오디오 입력 기반 실시간 STT(Speech-to-Text) 파이프라인 구축 (현재 데모 시뮬레이션 목적의 기정의 텍스트 답변 제출 모델에서 Web Speech API / Whisper 연동으로 고도화 예정).
-- [ ] Performance: MediaPipe 로컬 오버헤드 최적화 (FPS 조절을 통한 CPU 점유율 하향 조정).
-- [ ] 완성도 검증: 모의 면접 테스트 베드 구축 및 실제 사용자 피드백 반영.
+- [x] Frontend: 마이크 오디오 입력 기반 실시간 STT(Speech-to-Text) 파이프라인 구축 (Web Speech API 연동 완료 및 데모용 mock 답변 채우기 폴백 완비).
+- [x] Performance: MediaPipe 로컬 오버헤드 최적화 (Canvas 클리어 및 Face Mesh 렌더링 루프를 10 FPS 스로틀링 블록 내부로 이관하여 불필요한 60 FPS 드로잉 CPU 소모 차단 완료).
+- [x] 완성도 검증: 모의 면접 빌드 테스트 및 로컬 검증 완료.
 
 ---
 

@@ -6,7 +6,7 @@ import { MediaPipeService } from '../../../shared/lib/mediapipe';
 import type { FaceLandmarker } from '@mediapipe/tasks-vision';
 
 interface InterviewRoomProps {
-  onNextQuestion: () => void;
+  onNextQuestion: (answer: string) => void;
   onSkipQuestion: () => void;
 }
 
@@ -25,6 +25,7 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
     setShowSubtitles,
     mockQuestions,
     addFrameMetric,
+    answers,
   } = useInterviewStore();
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -33,7 +34,12 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
   const [isModelLoading, setIsModelLoading] = useState(false);
   const [realTimeEyeContact, setRealTimeEyeContact] = useState(true);
 
-  // 1. MediaPipe FaceLandmarker 로딩
+  // 1. STT 및 답변 관련 상태 선언
+  const [currentAnswerText, setCurrentAnswerText] = useState('');
+  const [isSTTActive, setIsSTTActive] = useState(false);
+  const [sttError, setSttError] = useState<string | null>(null);
+
+  // 2. MediaPipe FaceLandmarker 로딩
   useEffect(() => {
     let active = true;
     if (isCamOn) {
@@ -50,7 +56,7 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
     };
   }, [isCamOn]);
 
-  // 2. Web캠 미디어 바인딩
+  // 3. Web캠 미디어 바인딩
   useEffect(() => {
     if (isCamOn && videoRef.current) {
       navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 360 }, audio: false })
@@ -72,13 +78,12 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
     }
   }, [isCamOn, setIsCamOn]);
 
-  // 3. 실시간 프레임 분석 및 Canvas Face Mesh 오버레이 렌더링 루프 (10 FPS 스로틀링 최적화)
+  // 4. 실시간 프레임 분석 및 Canvas Face Mesh 오버레이 렌더링 루프 (10 FPS 스로틀링 최적화)
   useEffect(() => {
     let animationFrameId: number;
     let lastMetricTime = 0;
     let lastAnalysisTime = 0;
     const THROTTLE_MS = 100; // 10 FPS
-    let cachedResult: any = null;
 
     const renderLoop = (now: number) => {
       const video = videoRef.current;
@@ -93,82 +98,80 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
             canvas.height = video.videoHeight || 360;
           }
 
-          // 10 FPS 스로틀링: 100ms마다 한 번만 분석 수행
-          let result = cachedResult;
+          // 10 FPS 스로틀링: 100ms마다 한 번만 분석 및 드로잉 수행 (불필요한 60 FPS 드로잉 차단)
           if (now - lastAnalysisTime >= THROTTLE_MS) {
-            result = MediaPipeService.analyzeFrame(video, now, landmarker);
-            cachedResult = result;
+            const result = MediaPipeService.analyzeFrame(video, now, landmarker);
             lastAnalysisTime = now;
             setRealTimeEyeContact(result.eyeContact);
-          }
 
-          if (result) {
-            // 1초에 1번씩만 글로벌 store에 타임라인 데이터 적재
-            if (isRecording && now - lastMetricTime >= 1000) {
-              addFrameMetric({
-                timestamp: Math.round(now / 1000),
-                eyeContact: result.eyeContact,
-                tension: result.tension
-              });
-              lastMetricTime = now;
-            }
-
-            // 캔버스 클리어
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Face Mesh 그리드 그리기 (캐싱된 최신 랜드마크 렌더링)
-            if (result.landmarks && result.landmarks.length > 0) {
-              ctx.save();
-              ctx.translate(canvas.width, 0);
-              ctx.scale(-1, 1);
-
-              const strokeColor = result.eyeContact 
-                ? 'rgba(139, 92, 246, 0.45)' 
-                : 'rgba(239, 68, 68, 0.65)';
-                
-              ctx.strokeStyle = strokeColor;
-              ctx.lineWidth = 1.2;
-
-              ctx.beginPath();
-              const outerCount = Math.min(16, result.landmarks.length);
-              for (let i = 0; i < outerCount; i++) {
-                const pt = result.landmarks[i];
-                const px = pt.x * canvas.width;
-                const py = pt.y * canvas.height;
-                if (i === 0) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
+            if (result) {
+              // 1초에 1번씩만 글로벌 store에 타임라인 데이터 적재
+              if (isRecording && now - lastMetricTime >= 1000) {
+                addFrameMetric({
+                  timestamp: Math.round(now / 1000),
+                  eyeContact: result.eyeContact,
+                  tension: result.tension
+                });
+                lastMetricTime = now;
               }
-              ctx.closePath();
-              ctx.stroke();
 
-              if (result.landmarks.length >= 22) {
-                const drawDot = (idx: number, r = 2, color = '#a78bfa') => {
-                  const pt = result.landmarks[idx];
+              // 캔버스 클리어 및 그리기 연산 수행
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+              // Face Mesh 그리드 그리기 (최신 랜드마크 렌더링)
+              if (result.landmarks && result.landmarks.length > 0) {
+                ctx.save();
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+
+                const strokeColor = result.eyeContact 
+                  ? 'rgba(139, 92, 246, 0.45)' 
+                  : 'rgba(239, 68, 68, 0.65)';
+                  
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = 1.2;
+
+                ctx.beginPath();
+                const outerCount = Math.min(16, result.landmarks.length);
+                for (let i = 0; i < outerCount; i++) {
+                  const pt = result.landmarks[i];
+                  const px = pt.x * canvas.width;
+                  const py = pt.y * canvas.height;
+                  if (i === 0) ctx.moveTo(px, py);
+                  else ctx.lineTo(px, py);
+                }
+                ctx.closePath();
+                ctx.stroke();
+
+                if (result.landmarks.length >= 22) {
+                  const drawDot = (idx: number, r = 2, color = '#a78bfa') => {
+                    const pt = result.landmarks[idx];
+                    ctx.beginPath();
+                    ctx.arc(pt.x * canvas.width, pt.y * canvas.height, r, 0, Math.PI * 2);
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                  };
+
                   ctx.beginPath();
-                  ctx.arc(pt.x * canvas.width, pt.y * canvas.height, r, 0, Math.PI * 2);
-                  ctx.fillStyle = color;
-                  ctx.fill();
-                };
+                  ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
+                  ctx.lineTo(result.landmarks[20].x * canvas.width, result.landmarks[20].y * canvas.height);
+                  ctx.stroke();
 
-                ctx.beginPath();
-                ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
-                ctx.lineTo(result.landmarks[20].x * canvas.width, result.landmarks[20].y * canvas.height);
-                ctx.stroke();
+                  ctx.beginPath();
+                  ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
+                  ctx.lineTo(result.landmarks[18].x * canvas.width, result.landmarks[18].y * canvas.height);
+                  ctx.lineTo(result.landmarks[17].x * canvas.width, result.landmarks[17].y * canvas.height);
+                  ctx.stroke();
 
-                ctx.beginPath();
-                ctx.moveTo(result.landmarks[16].x * canvas.width, result.landmarks[16].y * canvas.height);
-                ctx.lineTo(result.landmarks[18].x * canvas.width, result.landmarks[18].y * canvas.height);
-                ctx.lineTo(result.landmarks[17].x * canvas.width, result.landmarks[17].y * canvas.height);
-                ctx.stroke();
+                  ctx.beginPath();
+                  ctx.arc(result.landmarks[19].x * canvas.width, result.landmarks[19].y * canvas.height, 6, 0, Math.PI, false);
+                  ctx.stroke();
 
-                ctx.beginPath();
-                ctx.arc(result.landmarks[19].x * canvas.width, result.landmarks[19].y * canvas.height, 6, 0, Math.PI, false);
-                ctx.stroke();
-
-                drawDot(20, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
-                drawDot(21, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
+                  drawDot(20, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
+                  drawDot(21, 2.5, result.eyeContact ? '#60a5fa' : '#ef4444');
+                }
+                ctx.restore();
               }
-              ctx.restore();
             }
           }
         }
@@ -178,12 +181,101 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
 
     if (isCamOn) {
       animationFrameId = requestAnimationFrame(renderLoop);
+    } else {
+      // 카메라 OFF 시 캔버스 클리어하여 잔상 제거
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      }
     }
 
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
   }, [isCamOn, landmarker, isRecording, addFrameMetric]);
+
+  // 5. Web Speech API (STT) 음성인식 수명 주기 및 재시작 루프 통합 관리
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setSttError('이 브라우저는 실시간 음성 인식을 지원하지 않습니다. 크롬 또는 사파리를 권장합니다.');
+      return;
+    }
+
+    let active = true;
+    const rec = new SpeechRecognition();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = 'ko-KR';
+
+    rec.onstart = () => {
+      if (active) {
+        setIsSTTActive(true);
+        setSttError(null);
+      }
+    };
+
+    rec.onerror = (event: any) => {
+      console.warn('STT 엔진 에러:', event.error);
+      if (active) {
+        if (event.error === 'not-allowed') {
+          setSttError('마이크 권한이 허용되지 않았습니다. 브라우저 설정을 확인해주세요.');
+        } else if (event.error === 'network') {
+          setSttError('네트워크 에러로 음성 인식이 어렵습니다.');
+        }
+      }
+    };
+
+    rec.onend = () => {
+      if (active) {
+        setIsSTTActive(false);
+        // 녹음 진행 및 듣기 상태 중 예기치 못한 자동 중단 시 자동 재시작
+        if (isRecording && interviewStatus === 'listening') {
+          try {
+            rec.start();
+          } catch (e) {
+            console.warn('STT 엔진 자동 재시작 에러:', e);
+          }
+        }
+      }
+    };
+
+    rec.onresult = (event: any) => {
+      if (!active) return;
+      let finalTranscript = '';
+      for (let i = 0; i < event.results.length; i++) {
+        finalTranscript += event.results[i][0].transcript;
+      }
+      setCurrentAnswerText(finalTranscript);
+    };
+
+    // 답변 수집 상태일 때 음성 인식 시작
+    if (isRecording && interviewStatus === 'listening') {
+      try {
+        rec.start();
+      } catch (e) {
+        console.warn('STT 시작 실패:', e);
+      }
+    }
+
+    return () => {
+      active = false;
+      try {
+        rec.stop();
+      } catch (e) {}
+    };
+  }, [isRecording, interviewStatus]);
+
+  // 질문 번호 변경 시 답변 텍스트 리셋
+  useEffect(() => {
+    setCurrentAnswerText('');
+  }, [currentQuestionIndex]);
+
+  const handleUseDemoAnswer = () => {
+    const demoAnswer = answers[currentQuestionIndex] || '이 부분에 대해서 최선의 노력을 다해 진행했습니다.';
+    setCurrentAnswerText(demoAnswer);
+  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-6xl mx-auto w-full">
@@ -274,6 +366,39 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
             </p>
           </div>
         )}
+
+        {/* 내 답변 입력 및 STT 프리뷰 */}
+        <div className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 backdrop-blur-md space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-emerald-400 tracking-wide">내 답변 (실시간 음성 인식 지원)</span>
+              {isSTTActive && (
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+              )}
+            </div>
+            <button
+              onClick={handleUseDemoAnswer}
+              className="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors border border-slate-700 font-semibold"
+            >
+              데모 답변 채우기
+            </button>
+          </div>
+          <textarea
+            value={currentAnswerText}
+            onChange={(e) => setCurrentAnswerText(e.target.value)}
+            placeholder="마이크를 켜고 말씀하시거나 직접 답변을 입력해주세요..."
+            className="w-full min-h-[100px] bg-slate-950/80 border border-slate-850 rounded-xl p-3 text-sm text-slate-200 focus:outline-none focus:border-violet-500/50 resize-none font-medium leading-relaxed"
+          />
+          {sttError && (
+            <p className="text-xs text-amber-500 flex items-center gap-1.5 font-medium">
+              <AlertCircle className="w-3.5 h-3.5" />
+              {sttError}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* 오른쪽: 면접관 아바타 및 파동 */}
@@ -352,7 +477,7 @@ export const InterviewRoom: React.FC<InterviewRoomProps> = ({ onNextQuestion, on
           <div className="space-y-3 mt-6">
             {interviewStatus === 'listening' && (
               <button
-                onClick={onNextQuestion}
+                onClick={() => onNextQuestion(currentAnswerText)}
                 className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold py-3.5 rounded-2xl shadow-xl shadow-emerald-500/10 transition-all flex items-center justify-center gap-2 group"
               >
                 <CheckCircle className="w-5 h-5" />
